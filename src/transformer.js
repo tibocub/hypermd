@@ -1,0 +1,288 @@
+/**
+ * HyperMD transformer
+ *
+ * Walks an mdast AST (with directive nodes already resolved by
+ * mdast-util-directive) and emits a HyperDOM tree.
+ *
+ * Entry point: transform(mdastRoot) → { nodes, styles, scripts }
+ */
+
+import {
+  DIRECTIVE_MAP,
+  createNode,
+  HEADING, PARAGRAPH, TEXT, STRONG, EMPHASIS,
+  INLINE_CODE, CODE_BLOCK, LINK, LIST, LIST_ITEM, BREAK,
+  COLOR_SPAN, SCRIPT_BLOCK, STYLE_BLOCK,
+} from './nodes.js'
+
+// ─── Public API ───────────────────────────────────────────────────────────────
+
+/**
+ * Transform a parsed mdast root into a HyperDOM document.
+ *
+ * @param {object} mdastRoot - the root node from mdast-util-from-markdown
+ * @returns {{
+ *   nodes:   object[],   // top-level HyperDOM nodes (the document body)
+ *   styles:  object[],   // collected StyleBlock nodes (applied last)
+ *   scripts: object[],   // collected ScriptBlock nodes (executed at mount)
+ * }}
+ */
+export function transform(mdastRoot, source = '') {
+  const ctx = {
+    styles: [],
+    scripts: [],
+    source,  // raw .hmd text, used to extract verbatim script/style bodies
+  }
+
+  const nodes = mdastRoot.children
+    .map(n => transformNode(n, ctx))
+    .filter(Boolean)
+    .filter(n => !isStrayFence(n))
+
+  return { nodes, styles: ctx.styles, scripts: ctx.scripts }
+}
+
+// ─── Internal helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Detect paragraphs that are stray closing fences (:::) from unbalanced
+ * directives. micromark emits these as raw text; we drop them silently.
+ */
+function isStrayFence(node) {
+  if (node.type !== 'Paragraph') return false
+  if (node.children.length !== 1) return false
+  const child = node.children[0]
+  return child.type === 'Text' && child.props?.value?.trim() === ':::'
+}
+
+function transformNode(node, ctx) {
+  // Directive nodes (custom HyperMD syntax)
+  if (node.type === 'containerDirective') return transformContainer(node, ctx)
+  if (node.type === 'leafDirective')      return transformLeaf(node, ctx)
+  if (node.type === 'textDirective')      return transformInlineDirective(node, ctx)
+
+  // Standard mdast nodes
+  switch (node.type) {
+    case 'heading':   return transformHeading(node, ctx)
+    case 'paragraph': return transformParagraph(node, ctx)
+    case 'text':      return createNode(TEXT,        { value: node.value })
+    case 'strong':    return createNode(STRONG,      {}, transformChildren(node, ctx))
+    case 'emphasis':  return createNode(EMPHASIS,    {}, transformChildren(node, ctx))
+    case 'inlineCode':return createNode(INLINE_CODE, { value: node.value })
+    case 'code':      return createNode(CODE_BLOCK,  { value: node.value, lang: node.lang ?? null })
+    case 'link':      return createNode(LINK,        { url: node.url, title: node.title ?? null }, transformChildren(node, ctx))
+    case 'list':      return createNode(LIST,        { ordered: node.ordered ?? false }, transformChildren(node, ctx))
+    case 'listItem':  return createNode(LIST_ITEM,   {}, transformChildren(node, ctx))
+    case 'break':     return createNode(BREAK,       {})
+    case 'thematicBreak': return createNode('DividerNode', {})
+
+    // Nodes we don't render (html passthrough, definitions, etc.)
+    case 'html':
+    case 'definition':
+    case 'linkReference':
+    case 'imageReference':
+      return null
+
+    default:
+      // Unknown node: log in dev, skip silently in prod
+      if (process.env.HYPERMD_DEBUG) {
+        console.warn(`[hypermd] unknown node type: ${node.type}`)
+      }
+      return null
+  }
+}
+
+function transformChildren(node, ctx) {
+  if (!node.children) return []
+  return node.children.map(n => transformNode(n, ctx)).filter(Boolean)
+}
+
+// ─── Directives ───────────────────────────────────────────────────────────────
+
+function transformContainer(node, ctx) {
+  const nodeType = DIRECTIVE_MAP[node.name]
+
+  if (!nodeType) {
+    console.warn(`[hypermd] unknown container directive: :::${node.name}`)
+    return null
+  }
+
+  const props = parseAttributes(node.attributes ?? {})
+  const children = transformChildren(node, ctx)
+  const hyperNode = createNode(nodeType, props, children)
+
+  // Pull script/style blocks out into their own collections
+  if (nodeType === SCRIPT_BLOCK) {
+    hyperNode.props.source = extractRawBody(node, ctx.source)
+    ctx.scripts.push(hyperNode)
+    return null  // scripts don't render inline
+  }
+
+  if (nodeType === STYLE_BLOCK) {
+    const raw = extractRawBody(node, ctx.source)
+    hyperNode.props.rules = parseStyleRules(raw)
+    ctx.styles.push(hyperNode)
+    return null  // styles don't render inline
+  }
+
+  return hyperNode
+}
+
+function transformLeaf(node, ctx) {
+  const nodeType = DIRECTIVE_MAP[node.name]
+
+  if (!nodeType) {
+    console.warn(`[hypermd] unknown leaf directive: ::${node.name}`)
+    return null
+  }
+
+  const props = parseAttributes(node.attributes ?? {})
+
+  // External script/style references: ::script{src="utils.js"} and
+  // ::style{src="theme.hcss"}. These carry no body — `src` is left
+  // unresolved here; a separate resolveExternals() pass (see
+  // resolve.js) is responsible for fetching the referenced source and
+  // filling in props.source / props.rules, since hypermd itself has no
+  // concept of *how* to fetch a "file" (that's a Hypergraph key lookup
+  // in HyperBBS, but could be a real filesystem read for, say, a future
+  // static-site build tool — hence the pluggable resolver).
+  if (nodeType === SCRIPT_BLOCK) {
+    if (!props.src) {
+      console.warn(`[hypermd] ::script leaf form requires a src= attribute (use :::script ... ::: for inline code). Attributes received: ${JSON.stringify(node.attributes)}`)
+      return null
+    }
+    props.source = '' // filled in by resolveExternals()
+    ctx.scripts.push(createNode(nodeType, props))
+    return null
+  }
+
+  if (nodeType === STYLE_BLOCK) {
+    if (!props.src) {
+      console.warn(`[hypermd] ::style leaf form requires a src= attribute (use :::style ... ::: for inline rules). Attributes received: ${JSON.stringify(node.attributes)}`)
+      return null
+    }
+    props.rules = {} // filled in by resolveExternals()
+    ctx.styles.push(createNode(nodeType, props))
+    return null
+  }
+
+  // Leaf directives can carry label content (the [text] part)
+  const label = extractTextContent(node)
+  if (label) props.label = label
+
+  return createNode(nodeType, props)
+}
+
+function transformInlineDirective(node, ctx) {
+  // :color[text]{fg=teal bg=dark}  →  ColorSpan
+  const nodeType = DIRECTIVE_MAP[node.name]
+  if (!nodeType) return null
+
+  const props = parseAttributes(node.attributes ?? {})
+  const children = transformChildren(node, ctx)
+
+  // For color spans, label text may also be in children
+  if (!children.length) {
+    const label = extractTextContent(node)
+    if (label) children.push(createNode(TEXT, { value: label }))
+  }
+
+  return createNode(nodeType, props, children)
+}
+
+// ─── Standard mdast nodes ─────────────────────────────────────────────────────
+
+function transformHeading(node, ctx) {
+  const children = transformChildren(node, ctx)
+  return createNode(HEADING, { depth: node.depth }, children)
+}
+
+function transformParagraph(node, ctx) {
+  const children = transformChildren(node, ctx)
+  return createNode(PARAGRAPH, {}, children)
+}
+
+// ─── Attribute / style helpers ────────────────────────────────────────────────
+
+/**
+ * Normalise directive attributes.
+ * Numbers are coerced; "true"/"false" strings become booleans.
+ */
+function parseAttributes(raw) {
+  const out = {}
+  for (const [k, v] of Object.entries(raw)) {
+    if (v === 'true')  { out[k] = true;  continue }
+    if (v === 'false') { out[k] = false; continue }
+    const n = Number(v)
+    out[k] = Number.isNaN(n) ? v : n
+  }
+  return out
+}
+
+/**
+ * Parse a :::style block's JSON content into a rules map.
+ * Returns {} on parse error so a bad style block doesn't crash the document.
+ *
+ * The format is { "selector": { propKey: propValue } }
+ * Selectors: type name ("ButtonNode"), id selector ("#my-btn"),
+ *            or type+id ("panel#sidebar").
+ */
+function parseStyleRules(source) {
+  try {
+    const raw = JSON.parse(source.trim())
+    if (typeof raw !== 'object' || Array.isArray(raw)) {
+      console.warn('[hypermd] :::style block must contain a JSON object')
+      return {}
+    }
+    return raw
+  } catch (e) {
+    console.warn('[hypermd] failed to parse :::style block:', e.message)
+    return {}
+  }
+}
+
+/**
+ * Extract the verbatim source text inside a container directive's body,
+ * by slicing the original .hmd string using mdast position offsets.
+ *
+ * This bypasses markdown inline parsing entirely — critical for
+ * :::script and :::style blocks, which must never have their content
+ * reinterpreted as markdown (backticks, template literals, brackets,
+ * etc. would otherwise be silently mangled).
+ *
+ * Falls back to extractTextContent() if position data is unavailable
+ * (e.g. when the tree was constructed programmatically rather than parsed).
+ */
+function extractRawBody(node, source) {
+  if (!source || !node.children?.length) return extractTextContent(node)
+
+  const first = node.children[0]
+  const last = node.children[node.children.length - 1]
+  if (!first.position || !last.position) return extractTextContent(node)
+
+  const start = first.position.start.offset
+  const end = last.position.end.offset
+  if (start == null || end == null) return extractTextContent(node)
+
+  return source.slice(start, end).trim()
+}
+
+/**
+ * Extract the plain text content of a directive node's children.
+ * Used for ::bigtext[TEXT] labels and as a fallback when raw source
+ * slicing isn't available. NOT safe for script/style bodies (see
+ * extractRawBody above) since it discards non-text inline nodes
+ * (inlineCode, emphasis, etc.) rather than preserving verbatim source.
+ */
+function extractTextContent(node) {
+  if (!node.children?.length) return ''
+  return node.children
+    .map(c => {
+      if (c.type === 'text') return c.value
+      if (c.type === 'inlineCode') return c.value
+      if (c.type === 'paragraph') return extractTextContent(c)
+      return ''
+    })
+    .join('')
+    .trim()
+}

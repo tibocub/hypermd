@@ -1,0 +1,28 @@
+{
+  "name": "hypermd",
+  "version": "0.0.1",
+  "description": "Custom markdown language parser for HyperBBS (terminal-first text-based dynamic sites and apps)",
+  "homepage": "https://github.com/tibocub/HyperMD#readme",
+  "bugs": {
+    "url": "https://github.com/tibocub/HyperMD/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tibocub/HyperMD.git"
+  },
+  "license": "MIT",
+  "author": "",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "mdast-util-directive": "^3.1.0",
+    "mdast-util-from-markdown": "^2.0.3",
+    "micromark-extension-directive": "^4.0.0"
+  },
+  "devDependencies": {
+    "brittle": "^4.0.2"
+  }
+}

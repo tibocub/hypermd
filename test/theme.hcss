@@ -1,0 +1,11 @@
+{
+  "h1": {
+		"render": "BigTextNode",
+		"font": "block",
+		"position": "center"
+		},
+  "ButtonNode": { "fg": "amber", "bold": true },
+  "ContainerPanel": { "borderStyle": "rounded" },
+  "#guestbook": { "fg": "teal", "padding": 1 },
+  "MarqueeNode": { "speed": 2 }
+}
