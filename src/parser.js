@@ -37,13 +37,15 @@ export function parse(source, opts = {}) {
   })
 
   // 2. Transform mdast → HyperDOM (pass raw source for verbatim script/style extraction)
-  const { nodes, styles, scripts } = transform(mdast, source)
+  const { nodes, styles, scripts, queries, templates } = transform(mdast, source)
 
   return {
     nodes,
     styles,
     scripts,
-    _mdast: mdast,  // retain for tooling / debugger
+    queries,
+    templates,
+    _mdast: mdast,
   }
 }
 

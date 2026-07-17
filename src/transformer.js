@@ -12,7 +12,7 @@ import {
   createNode,
   HEADING, PARAGRAPH, TEXT, STRONG, EMPHASIS,
   INLINE_CODE, CODE_BLOCK, LINK, LIST, LIST_ITEM, BREAK,
-  COLOR_SPAN, SCRIPT_BLOCK, STYLE_BLOCK,
+  COLOR_SPAN, SCRIPT_BLOCK, STYLE_BLOCK, QUERY_BLOCK, TEMPLATE_BLOCK,
 } from './nodes.js'
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -31,7 +31,9 @@ export function transform(mdastRoot, source = '') {
   const ctx = {
     styles: [],
     scripts: [],
-    source,  // raw .hmd text, used to extract verbatim script/style bodies
+    queries: [],
+    templates: [],
+    source,
   }
 
   const nodes = mdastRoot.children
@@ -39,7 +41,7 @@ export function transform(mdastRoot, source = '') {
     .filter(Boolean)
     .filter(n => !isStrayFence(n))
 
-  return { nodes, styles: ctx.styles, scripts: ctx.scripts }
+  return { nodes, styles: ctx.styles, scripts: ctx.scripts, queries: ctx.queries, templates: ctx.templates }
 }
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
@@ -111,7 +113,7 @@ function transformContainer(node, ctx) {
   const children = transformChildren(node, ctx)
   const hyperNode = createNode(nodeType, props, children)
 
-  // Pull script/style blocks out into their own collections
+  // Pull script/style/query/template blocks out into their own collections
   if (nodeType === SCRIPT_BLOCK) {
     hyperNode.props.source = extractRawBody(node, ctx.source)
     ctx.scripts.push(hyperNode)
@@ -123,6 +125,22 @@ function transformContainer(node, ctx) {
     hyperNode.props.rules = parseStyleRules(raw)
     ctx.styles.push(hyperNode)
     return null  // styles don't render inline
+  }
+
+  if (nodeType === TEMPLATE_BLOCK) {
+    // :::template body is raw HyperMD source with {{interpolation}} holes.
+    // Extract verbatim (same as :::script) so markdown inside templates
+    // isn't mangled by the parser — it will be re-parsed per item by the
+    // template engine with real context substituted in.
+    if (!props.for) {
+      console.warn('[hypermd] :::template block requires a for= attribute matching a :::query block\'s as= name')
+      return null
+    }
+    hyperNode.props.templateSource = extractRawBody(node, ctx.source)
+    ctx.templates.push(hyperNode)
+    // Template placeholder renders inline; resolver fills its children
+    hyperNode.props._resolved = false
+    return hyperNode
   }
 
   return hyperNode
@@ -137,6 +155,27 @@ function transformLeaf(node, ctx) {
   }
 
   const props = parseAttributes(node.attributes ?? {})
+
+  // Leaf query block: ::query{type=post as=posts sort=createdAt:desc limit=20}
+  // All config lives in attributes — no body. Using leaf (::) rather than
+  // container (:::) syntax because query blocks have no meaningful body:
+  // a container form would cause the following :::template to be parsed
+  // as a nested child of the query rather than a sibling.
+  if (nodeType === QUERY_BLOCK) {
+    if (!props.as) {
+      console.warn(`[hypermd] ::query requires an as= attribute to name the result set. Attributes received: ${JSON.stringify(node.attributes)}`)
+      return null
+    }
+    if (props.sort) {
+      const [field, dir = 'asc'] = String(props.sort).split(':')
+      props.sortField = field
+      props.sortDir   = dir === 'desc' ? 'desc' : 'asc'
+    }
+    const queryNode = createNode(nodeType, props)
+    queryNode.props._resolved = false
+    ctx.queries.push(queryNode)
+    return queryNode  // renders inline as placeholder; resolver populates children
+  }
 
   // External script/style references: ::script{src="utils.js"} and
   // ::style{src="theme.hcss"}. These carry no body — `src` is left

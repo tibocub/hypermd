@@ -25,7 +25,8 @@
 
 export { parse, applyStyles } from './parser.js'
 export { transform } from './transformer.js'
-export {resolveExternals} from './resolve.js'
+export { resolveExternals } from './resolve.js'
+export { interpolate } from './template-engine.js'
 
 export {
   createNode,
@@ -45,6 +46,10 @@ export {
   MARQUEE_NODE,
   BIGTEXT_NODE,
   DIVIDER_NODE,
+
+  // Data-driven views
+  QUERY_BLOCK,
+  TEMPLATE_BLOCK,
 
   // Meta / scripting
   SCRIPT_BLOCK,
