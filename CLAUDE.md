@@ -13,6 +13,24 @@ source into a node tree that HyperBBS renders via OpenTUI.
 `transformer.js` (mdast → HyperMD node tree), `resolve.js` (query/template resolution),
 `template-engine.js` (interpolation), `index.js` (public API — `parse`, `interpolate`, …).
 
+## Media nodes
+
+Three node types, one per kind (`nodes.js`): `AudioNode` (`::audio[caption]{src=…}`), `VideoNode`
+(`::video[…]`), and `ImageNode` (`::image[…]`, `::img[…]`, and standard `![alt](src)`).
+
+- `src` is always kept as text — exempt from the usual number coercion of settings.
+- A media directive with no `src` is still produced, with `error: 'missing-src'`, so the viewer sees
+  a notice instead of nothing. Other leaf directives drop themselves when a required setting is
+  missing; media deliberately does not.
+- Markdown images sitting directly in a paragraph are **lifted out** of it (HyperBBS flattens
+  paragraphs to one line of text, where an image would vanish). Images nested deeper, e.g. inside a
+  link, stay inline.
+- HyperMD never fetches media. Loading, playing and saving are the renderer's job.
+
+**These nodes have real assertions**, in HyperBBS:
+`E:\Code\P2P\HyperBBS\test\brittle\media\hypermd-media-parse.js`. Run them from HyperBBS when
+changing media parsing. Design: `E:\Code\P2P\HyperBBS\specs\001-hypersite-media\`.
+
 ## ⚠ There are no real tests
 
 `test/*.js` are **probe scripts, not assertions**. They `console.log` parser output and report
