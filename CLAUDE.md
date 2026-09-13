@@ -42,9 +42,10 @@ Short version:
   project**, and currently the only one.
 - **hyperDNS**, **SwarmFS** — naming and file transfer; unrelated to HyperMD.
 
-**`HyperBBS/node_modules/hypermd` is a symlink to this directory.** Editing `src/` here changes
-HyperBBS's behavior immediately, with no publish step — but HyperBBS declares `"hypermd": ">=0.0.1"`,
-an unbounded range, so a plain `npm install` there could replace the symlink with a registry copy.
+**`HyperBBS/node_modules/hypermd` is a link to this directory.** HyperBBS declares
+`"hypermd": "file:../HyperMD"`, so `npm install` there creates the link itself and it cannot be
+replaced by a registry or GitHub copy. Editing `src/` here changes HyperBBS's behavior immediately,
+with no publish step.
 When changing the parser's output shape, check HyperBBS's `src/query-resolver.js` (imports `parse`
 and `interpolate`) and re-run HyperBBS's suite.
 
