@@ -13,6 +13,7 @@ import {
   HEADING, PARAGRAPH, TEXT, STRONG, EMPHASIS,
   INLINE_CODE, CODE_BLOCK, LINK, LIST, LIST_ITEM, BREAK,
   COLOR_SPAN, SCRIPT_BLOCK, STYLE_BLOCK, QUERY_BLOCK, TEMPLATE_BLOCK,
+  AUDIO_NODE, VIDEO_NODE, IMAGE_NODE,
 } from './nodes.js'
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -38,6 +39,7 @@ export function transform(mdastRoot, source = '') {
 
   const nodes = mdastRoot.children
     .map(n => transformNode(n, ctx))
+    .flat() // a paragraph containing images becomes several nodes
     .filter(Boolean)
     .filter(n => !isStrayFence(n))
 
@@ -72,6 +74,7 @@ function transformNode(node, ctx) {
     case 'emphasis':  return createNode(EMPHASIS,    {}, transformChildren(node, ctx))
     case 'inlineCode':return createNode(INLINE_CODE, { value: node.value })
     case 'code':      return createNode(CODE_BLOCK,  { value: node.value, lang: node.lang ?? null })
+    case 'image':     return transformImage(node)
     case 'link':      return createNode(LINK,        { url: node.url, title: node.title ?? null }, transformChildren(node, ctx))
     case 'list':      return createNode(LIST,        { ordered: node.ordered ?? false }, transformChildren(node, ctx))
     case 'listItem':  return createNode(LIST_ITEM,   {}, transformChildren(node, ctx))
@@ -96,7 +99,7 @@ function transformNode(node, ctx) {
 
 function transformChildren(node, ctx) {
   if (!node.children) return []
-  return node.children.map(n => transformNode(n, ctx)).filter(Boolean)
+  return node.children.map(n => transformNode(n, ctx)).flat().filter(Boolean)
 }
 
 // ─── Directives ───────────────────────────────────────────────────────────────
@@ -152,6 +155,10 @@ function transformLeaf(node, ctx) {
   if (!nodeType) {
     console.warn(`[hypermd] unknown leaf directive: ::${node.name}`)
     return null
+  }
+
+  if (nodeType === AUDIO_NODE || nodeType === VIDEO_NODE || nodeType === IMAGE_NODE) {
+    return transformMediaLeaf(node, nodeType)
   }
 
   const props = parseAttributes(node.attributes ?? {})
@@ -237,8 +244,72 @@ function transformHeading(node, ctx) {
 }
 
 function transformParagraph(node, ctx) {
-  const children = transformChildren(node, ctx)
-  return createNode(PARAGRAPH, {}, children)
+  // Images can't stay inside a paragraph: renderers flatten a paragraph's
+  // children into one line of text, so an image left there would vanish.
+  // Lift each direct image child out, splitting the paragraph around it.
+  // Images nested deeper (inside a link, say) stay inline.
+  if (!node.children?.some(child => child.type === 'image')) {
+    const children = transformChildren(node, ctx)
+    return createNode(PARAGRAPH, {}, children)
+  }
+
+  const out = []
+  let run = []
+  const flush = () => {
+    const children = run.map(n => transformNode(n, ctx)).flat().filter(Boolean)
+    const blank = children.every(c => c.type === TEXT && !String(c.props.value ?? '').trim())
+    if (children.length && !blank) out.push(createNode(PARAGRAPH, {}, children))
+    run = []
+  }
+  for (const child of node.children) {
+    if (child.type === 'image') {
+      flush()
+      out.push(transformImage(child))
+    } else {
+      run.push(child)
+    }
+  }
+  flush()
+  return out
+}
+
+// ─── Media ────────────────────────────────────────────────────────────────────
+
+/**
+ * ::audio / ::video / ::image / ::img leaf directives.
+ *
+ * Unlike other leaf directives, a media element with no `src` is NOT dropped:
+ * it is kept with `error: 'missing-src'` so a renderer can show a notice
+ * instead of silently losing it. `src` and `type` are read from the raw
+ * attributes, bypassing parseAttributes' number coercion — `src=12345` must
+ * stay the text "12345".
+ */
+function transformMediaLeaf(node, nodeType) {
+  const raw = node.attributes ?? {}
+  const props = parseAttributes(raw)
+  const src = typeof raw.src === 'string' && raw.src.trim() !== '' ? raw.src : null
+
+  props.src = src
+  props.type = typeof raw.type === 'string' && raw.type !== '' ? raw.type : null
+  props.label = extractTextContent(node) || null
+  props.title = null
+  props.origin = 'directive'
+  props.error = src === null ? 'missing-src' : null
+
+  return createNode(nodeType, props)
+}
+
+/** Standard markdown image: ![alt](src "title"). */
+function transformImage(node) {
+  const src = typeof node.url === 'string' && node.url.trim() !== '' ? node.url : null
+  return createNode(IMAGE_NODE, {
+    src,
+    label: node.alt || null,
+    title: node.title ?? null,
+    type: null,
+    origin: 'markdown-image',
+    error: src === null ? 'missing-src' : null,
+  })
 }
 
 // ─── Attribute / style helpers ────────────────────────────────────────────────

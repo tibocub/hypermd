@@ -68,6 +68,11 @@ export {
   LIST_ITEM,
   BREAK,
   COLOR_SPAN,
+
+  // Media
+  AUDIO_NODE,
+  VIDEO_NODE,
+  IMAGE_NODE,
 } from './nodes.js'
 
 /**
