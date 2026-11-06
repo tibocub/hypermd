@@ -9,13 +9,15 @@ const read = rel => fs.readFileSync(`${out}/${rel}`, 'utf8')
 
 test('build: sample site', t => {
   fs.rmSync(out, { recursive: true, force: true })
+  fs.writeFileSync(`${site}/.secret`, 'x')
   const first = build(site, out)
   const again = build(site, out)
   t.alike(again, first, 'rebuilding over the output gives the same result')
 
   t.alike(first.pages.sort(), ['faq.html', 'guide/start.html', 'index.html'])
   t.alike(first.files.sort(), ['app.js', 'media/logo.png', 'media/theme.mp3', 'site.css'])
-  t.absent(fs.existsSync(`${out}/.env`), 'dotfiles are not published')
+  t.absent(fs.existsSync(`${out}/.secret`), 'dotfiles are not published')
+  fs.rmSync(`${site}/.secret`)
   t.absent(fs.existsSync(`${out}/_site`), 'output folder is not copied into itself')
   t.ok(fs.existsSync(`${out}/.nojekyll`))
   t.is(read('media/logo.png'), 'PNG')
