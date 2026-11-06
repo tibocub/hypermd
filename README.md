@@ -4,7 +4,7 @@
 
 Markdown plus a small custom directive syntax, parsed into a renderer-agnostic tree called **HyperDOM**.
 
-This package only parses. It has no opinion on how the tree gets drawn — that's a renderer's job (HyperBBS's terminal UI today; possibly a static HTML generator later). `hypermd` doesn't import or depend on either.
+The parser has no opinion on how the tree gets drawn — that's a renderer's job (HyperBBS's terminal UI). This package also ships one renderer of its own, **HyperDOM → HTML** (`renderHTML`, `renderPage`), and a static site builder on top of it (`hypermd build`).
 
 ---
 
@@ -38,6 +38,41 @@ doc.styles   // collected :::style blocks (already applied above)
 doc.scripts  // collected :::script blocks — raw source, verbatim
 doc._mdast   // underlying mdast tree, for debugging
 ```
+
+### HTML
+
+```js
+import { parse, renderHTML, renderPage } from 'hypermd'
+
+renderHTML(doc.nodes)                                       // body fragment
+renderPage(doc, { styles: ['site.css'], scripts: ['app.js'] }) // full page
+```
+
+- Safe for page text: everything is escaped, raw HTML in the source is dropped by the parser, and
+  `javascript:` / `vbscript:` / `data:` links become `#`. `renderHTML` never writes `<script>`;
+  `renderPage` only adds the script files you pass it. A page's `:::script` blocks are not included.
+- Every element has a `hmd-<NodeType>` class (`hmd-ContainerPanel`, `hmd-ButtonNode`, …) for your CSS.
+- `href: url => …` rewrites every link and media address.
+- `:::style` rules are terminal props (`fg`, `bold`, …) and are **not** turned into CSS.
+- An unresolved `:::template` / `::query` renders nothing.
+
+### `hypermd build` — static site
+
+```bash
+npx hypermd build <folder> [--out <dir>]     # Node
+bare bin/hypermd.js build <folder> [--out <dir>]   # Bare
+```
+
+Turns a folder of `.hmd` pages plus their files into a plain HTML site (e.g. for GitHub Pages).
+Default output: `<folder>/_site`.
+
+- `page.hmd` → `page.html`, same folders. Links to `.hmd` become `.html`; links starting with `/`
+  are made relative, so the site works under any base path.
+- Every other file (JS, CSS, images, audio…) is copied as is. Dotfiles and `node_modules` are skipped.
+- `*.css` at the folder root are linked from every page. `::script{src=…}` becomes
+  `<script type="module" src=…>`.
+- No `index.hmd`? An `index.html` listing all pages is made. A `.nojekyll` is written for GitHub Pages.
+- The output folder is not emptied first.
 
 A HyperDOM node:
 
@@ -80,7 +115,13 @@ Inline :directiveName[label]{attr=value} inside a paragraph.
 | `::hr`       | `DividerNode`      | leaf                                |
 | `:color`     | `ColorSpan`        | inline                              |
 
-Full list lives in `src/nodes.js`. Unknown directives are dropped with a `console.warn`, not a crash — verified by `test/brittle.hmd`.
+Media: `::audio`, `::video`, `::image` / `::img` and `![alt](src)` → `AudioNode`, `VideoNode`, `ImageNode`.
+
+Full list lives in `src/nodes.js`. Unknown `::`/`:::` directives are dropped with a `console.warn`,
+not a crash. An unknown inline `:word` is kept as plain text (so `Note:abc` survives).
+
+**Attributes:** plain decimal numbers (`limit=10`) and `true`/`false` are converted; everything
+else stays text — `placeholder=""`, `hex=0x10`, and `id` always (`id=007` stays `"007"`).
 
 ---
 
@@ -107,10 +148,20 @@ Using `:::` at every nesting level will not close correctly — there's no way t
 ## Known limitations
 
 - **No script execution model.** `doc.scripts` is raw source strings; what runs it and with what API is entirely up to the consumer.
-- **No HTML renderer exists yet.** HyperDOM avoids baking in OpenTUI-specific assumptions where possible, but "renderer-agnostic" is a design goal here, not a proven guarantee.
-- **No `:::query` / `:::template` directives yet** (declarative, scriptless data-driven views). Planned, not implemented.
+- **Not parsed yet:** blockquotes, tables, strikethrough, task lists and footnotes are dropped (no GFM).
 
 
+
+---
+
+## Tests
+
+```bash
+npm test           # Node
+npm run test:bare  # Bare
+```
+
+Real `brittle` assertions in `test/*.test.js`. `test/fixtures/site` is the sample site for the build test.
 
 ---
 

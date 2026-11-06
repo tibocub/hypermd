@@ -1,0 +1,10 @@
+::script{src=app.js}
+
+# Docs home
+
+Read the [guide](guide/start.hmd#install) or the [FAQ](/faq.hmd).
+Visit [the web](https://example.org) or [a hypersite](hyper://abc).
+
+![Logo](media/logo.png)
+
+::audio[Theme]{src=media/theme.mp3}

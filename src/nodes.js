@@ -164,6 +164,20 @@ export const BREAK = 'Break'
 /** Inline: color span  :color[text]{fg=teal} */
 export const COLOR_SPAN = 'ColorSpan'
 
+// ─── Media ───────────────────────────────────────────────────────────────────
+// Audio, video and images. Always leaf nodes with no children. Their `src`
+// is kept as text, never fetched, and never converted to a number. See
+// HyperBBS specs/001-hypersite-media/contracts/hypermd-media-nodes.md.
+
+/** ::audio[caption]{src=...} */
+export const AUDIO_NODE = 'AudioNode'
+
+/** ::video[caption]{src=...} */
+export const VIDEO_NODE = 'VideoNode'
+
+/** ::image[caption]{src=...}, ::img[...]{...}, and markdown ![alt](src) */
+export const IMAGE_NODE = 'ImageNode'
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** All recognised directive names → node type */
@@ -185,13 +199,11 @@ export const DIRECTIVE_MAP = {
   hr:       DIVIDER_NODE,
   query:    QUERY_BLOCK,    // ::query (leaf) — all config in attributes, no body
 
-  // leaves (::name)
-  input:   INPUT_NODE,
-  button:  BUTTON_NODE,
-  select:  SELECT_NODE,
-  marquee: MARQUEE_NODE,
-  bigtext: BIGTEXT_NODE,
-  hr:      DIVIDER_NODE,
+  // media (::name)
+  audio:    AUDIO_NODE,
+  video:    VIDEO_NODE,
+  image:    IMAGE_NODE,
+  img:      IMAGE_NODE,   // short form of ::image
 
   // inline (:name[...])
   color:   COLOR_SPAN,

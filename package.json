@@ -14,17 +14,31 @@
   "author": "",
   "type": "module",
   "main": "src/index.js",
-  "//test": "The files under test/ are PROBE SCRIPTS, not assertions - they console.log parser output and report 0/0 asserts. `npm test` runs them as a crash-level smoke check only; a green run does NOT mean behavior is correct. Writing real brittle assertions is the top open task here.",
   "scripts": {
-    "test": "npm run smoke",
-    "smoke": "brittle-node test/parse.js test/query.js test/resolve.js"
+    "test": "brittle-node test/*.test.js",
+    "test:bare": "brittle-bare test/*.test.js"
   },
   "dependencies": {
     "mdast-util-directive": "^3.1.0",
     "mdast-util-from-markdown": "^2.0.3",
-    "micromark-extension-directive": "^4.0.0"
+    "micromark-extension-directive": "^4.0.0",
+    "bare-fs": "^4.7.2",
+    "bare-path": "^3.0.1"
   },
   "devDependencies": {
     "brittle": "^4.0.2"
+  },
+  "bin": {
+    "hypermd": "bin/hypermd.js"
+  },
+  "imports": {
+    "fs": {
+      "bare": "bare-fs",
+      "default": "fs"
+    },
+    "path": {
+      "bare": "bare-path",
+      "default": "path"
+    }
   }
 }
