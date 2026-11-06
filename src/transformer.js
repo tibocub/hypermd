@@ -35,6 +35,7 @@ export function transform(mdastRoot, source = '') {
     queries: [],
     templates: [],
     source,
+    definitions: collectDefinitions(mdastRoot, {}),
   }
 
   const nodes = mdastRoot.children
@@ -75,6 +76,12 @@ function transformNode(node, ctx) {
     case 'inlineCode':return createNode(INLINE_CODE, { value: node.value })
     case 'code':      return createNode(CODE_BLOCK,  { value: node.value, lang: node.lang ?? null })
     case 'image':     return transformImage(node)
+    case 'imageReference': return transformImage(resolveReference(node, ctx))
+    case 'linkReference': {
+      const def = ctx.definitions[node.identifier]
+      const children = transformChildren(node, ctx)
+      return def ? createNode(LINK, { url: def.url, title: def.title ?? null }, children) : children
+    }
     case 'link':      return createNode(LINK,        { url: node.url, title: node.title ?? null }, transformChildren(node, ctx))
     case 'list':      return createNode(LIST,        { ordered: node.ordered ?? false }, transformChildren(node, ctx))
     case 'listItem':  return createNode(LIST_ITEM,   {}, transformChildren(node, ctx))
@@ -84,13 +91,11 @@ function transformNode(node, ctx) {
     // Nodes we don't render (html passthrough, definitions, etc.)
     case 'html':
     case 'definition':
-    case 'linkReference':
-    case 'imageReference':
       return null
 
     default:
       // Unknown node: log in dev, skip silently in prod
-      if (process.env.HYPERMD_DEBUG) {
+      if (globalThis.process?.env?.HYPERMD_DEBUG) { // no `process` global on Bare
         console.warn(`[hypermd] unknown node type: ${node.type}`)
       }
       return null
@@ -222,7 +227,8 @@ function transformLeaf(node, ctx) {
 function transformInlineDirective(node, ctx) {
   // :color[text]{fg=teal bg=dark}  →  ColorSpan
   const nodeType = DIRECTIVE_MAP[node.name]
-  if (!nodeType) return null
+  // Unknown `:word` is ordinary text ("Note:abc", ":smile"), keep it verbatim
+  if (!nodeType) return createNode(TEXT, { value: sourceOf(node, ctx.source) })
 
   const props = parseAttributes(node.attributes ?? {})
   const children = transformChildren(node, ctx)
@@ -248,7 +254,7 @@ function transformParagraph(node, ctx) {
   // children into one line of text, so an image left there would vanish.
   // Lift each direct image child out, splitting the paragraph around it.
   // Images nested deeper (inside a link, say) stay inline.
-  if (!node.children?.some(child => child.type === 'image')) {
+  if (!node.children?.some(isImage)) {
     const children = transformChildren(node, ctx)
     return createNode(PARAGRAPH, {}, children)
   }
@@ -262,9 +268,9 @@ function transformParagraph(node, ctx) {
     run = []
   }
   for (const child of node.children) {
-    if (child.type === 'image') {
+    if (isImage(child)) {
       flush()
-      out.push(transformImage(child))
+      out.push(transformNode(child, ctx))
     } else {
       run.push(child)
     }
@@ -299,6 +305,31 @@ function transformMediaLeaf(node, nodeType) {
   return createNode(nodeType, props)
 }
 
+function isImage(node) {
+  return node.type === 'image' || node.type === 'imageReference'
+}
+
+/** `![alt][ref]` → the image node shape of `![alt](url "title")`, via its [ref]: definition. */
+function resolveReference(node, ctx) {
+  const def = ctx.definitions[node.identifier]
+  return { alt: node.alt, url: def?.url ?? null, title: def?.title ?? null }
+}
+
+/** `[ref]: url "title"` lines can sit anywhere, even after their first use. */
+function collectDefinitions(node, out) {
+  if (node.type === 'definition' && !(node.identifier in out)) out[node.identifier] = node
+  for (const child of node.children ?? []) collectDefinitions(child, out)
+  return out
+}
+
+/** The exact source text of a node, or its plain text when positions are missing. */
+function sourceOf(node, source) {
+  const start = node.position?.start?.offset
+  const end = node.position?.end?.offset
+  if (!source || start == null || end == null) return ':' + node.name + extractTextContent(node)
+  return source.slice(start, end)
+}
+
 /** Standard markdown image: ![alt](src "title"). */
 function transformImage(node) {
   const src = typeof node.url === 'string' && node.url.trim() !== '' ? node.url : null
@@ -316,15 +347,16 @@ function transformImage(node) {
 
 /**
  * Normalise directive attributes.
- * Numbers are coerced; "true"/"false" strings become booleans.
+ * Plain decimal numbers are coerced; "true"/"false" strings become booleans.
+ * Anything else stays text: "" (not 0), "0x10" (not 16), and `id` always,
+ * so id=007 is still found as "007".
  */
 function parseAttributes(raw) {
   const out = {}
   for (const [k, v] of Object.entries(raw)) {
     if (v === 'true')  { out[k] = true;  continue }
     if (v === 'false') { out[k] = false; continue }
-    const n = Number(v)
-    out[k] = Number.isNaN(n) ? v : n
+    out[k] = k !== 'id' && /^-?\d+(\.\d+)?$/.test(v) ? Number(v) : v
   }
   return out
 }

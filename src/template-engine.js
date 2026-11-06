@@ -108,6 +108,7 @@ function applyFilter(value, filter) {
     }
 
     case 'date': {
+      if (value === '') return '' // a missing date is not 1970
       const ts = Number(value)
       const d  = new Date(isNaN(ts) ? value : ts)
       if (isNaN(d.getTime())) return value

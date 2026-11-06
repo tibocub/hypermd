@@ -14,6 +14,8 @@
  *   //   doc._mdast   -> underlying mdast tree, for debugging
  *
  *   applyStyles(doc.nodes, doc.styles)   // mutates doc.nodes in place
+ *   renderHTML(doc.nodes)                // HTML fragment (see html.js)
+ *   renderHTML(doc.nodes)                // HTML fragment (see html.js)
  *
  * A HyperDOM node is a plain object:
  *   { type, id, props, children, _tuiRef }
@@ -27,6 +29,7 @@ export { parse, applyStyles } from './parser.js'
 export { transform } from './transformer.js'
 export { resolveExternals } from './resolve.js'
 export { interpolate } from './template-engine.js'
+export { renderHTML, renderPage, escapeHTML, safeURL, plainText } from './html.js'
 
 export {
   createNode,
