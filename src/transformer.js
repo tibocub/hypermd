@@ -14,6 +14,10 @@ import {
   INLINE_CODE, CODE_BLOCK, LINK, LIST, LIST_ITEM, BREAK,
   COLOR_SPAN, SCRIPT_BLOCK, STYLE_BLOCK, QUERY_BLOCK, TEMPLATE_BLOCK,
   AUDIO_NODE, VIDEO_NODE, IMAGE_NODE,
+  BLOCKQUOTE, STRIKETHROUGH, TABLE, TABLE_ROW, TABLE_CELL,
+  FOOTNOTE_REFERENCE, FOOTNOTES, FOOTNOTE_DEFINITION,
+  NOTE_BOX, TOC_NODE, PAGE_META,
+  plainText,
 } from './nodes.js'
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -34,8 +38,11 @@ export function transform(mdastRoot, source = '') {
     scripts: [],
     queries: [],
     templates: [],
+    meta: {},
     source,
     definitions: collectDefinitions(mdastRoot, {}),
+    footnoteDefs: collectFootnotes(mdastRoot, {}),
+    footnotes: new Map(), // identifier → number, in order of first reference
   }
 
   const nodes = mdastRoot.children
@@ -44,7 +51,10 @@ export function transform(mdastRoot, source = '') {
     .filter(Boolean)
     .filter(n => !isStrayFence(n))
 
-  return { nodes, styles: ctx.styles, scripts: ctx.scripts, queries: ctx.queries, templates: ctx.templates }
+  if (ctx.footnotes.size) nodes.push(footnoteSection(ctx))
+  linkHeadings(nodes)
+
+  return { nodes, styles: ctx.styles, scripts: ctx.scripts, queries: ctx.queries, templates: ctx.templates, meta: ctx.meta }
 }
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
@@ -84,13 +94,22 @@ function transformNode(node, ctx) {
     }
     case 'link':      return createNode(LINK,        { url: node.url, title: node.title ?? null }, transformChildren(node, ctx))
     case 'list':      return createNode(LIST,        { ordered: node.ordered ?? false }, transformChildren(node, ctx))
-    case 'listItem':  return createNode(LIST_ITEM,   {}, transformChildren(node, ctx))
+    case 'listItem':  return createNode(LIST_ITEM,   typeof node.checked === 'boolean' ? { checked: node.checked } : {}, transformChildren(node, ctx))
+    case 'blockquote': return createNode(BLOCKQUOTE, {}, transformChildren(node, ctx))
+    case 'delete':    return createNode(STRIKETHROUGH, {}, transformChildren(node, ctx))
+    case 'table':     return transformTable(node, ctx)
+    case 'footnoteReference': {
+      if (!ctx.footnoteDefs[node.identifier]) return createNode(TEXT, { value: `[^${node.label ?? node.identifier}]` })
+      if (!ctx.footnotes.has(node.identifier)) ctx.footnotes.set(node.identifier, ctx.footnotes.size + 1)
+      return createNode(FOOTNOTE_REFERENCE, { identifier: node.identifier, number: ctx.footnotes.get(node.identifier) })
+    }
     case 'break':     return createNode(BREAK,       {})
     case 'thematicBreak': return createNode('DividerNode', {})
 
     // Nodes we don't render (html passthrough, definitions, etc.)
     case 'html':
     case 'definition':
+    case 'footnoteDefinition': // gathered at the end of the page, see footnoteSection()
       return null
 
     default:
@@ -118,6 +137,7 @@ function transformContainer(node, ctx) {
   }
 
   const props = parseAttributes(node.attributes ?? {})
+  if (nodeType === NOTE_BOX) props.kind = node.name
   const children = transformChildren(node, ctx)
   const hyperNode = createNode(nodeType, props, children)
 
@@ -167,6 +187,15 @@ function transformLeaf(node, ctx) {
   }
 
   const props = parseAttributes(node.attributes ?? {})
+
+  // ::page{title=… description=… order=N}: page details, not rendered.
+  // title/description stay text even when they look like numbers.
+  if (nodeType === PAGE_META) {
+    const raw = node.attributes ?? {}
+    for (const k of ['title', 'description']) if (typeof raw[k] === 'string') props[k] = raw[k]
+    Object.assign(ctx.meta, props)
+    return null
+  }
 
   // Leaf query block: ::query{type=post as=posts sort=createdAt:desc limit=20}
   // All config lives in attributes — no body. Using leaf (::) rather than
@@ -277,6 +306,86 @@ function transformParagraph(node, ctx) {
   }
   flush()
   return out
+}
+
+function transformTable(node, ctx) {
+  const align = node.align ?? []
+  const rows = (node.children ?? []).map((row, r) =>
+    createNode(TABLE_ROW, {}, (row.children ?? []).map((cell, c) =>
+      createNode(TABLE_CELL, { header: r === 0, align: align[c] ?? null }, transformChildren(cell, ctx)))))
+  return createNode(TABLE, { align }, rows)
+}
+
+/** One Footnotes node with every referenced definition, numbered in order of first use. */
+function footnoteSection(ctx) {
+  const defs = []
+  // Map iteration also visits footnotes first referenced inside another footnote
+  for (const [identifier, number] of ctx.footnotes) {
+    defs.push(createNode(FOOTNOTE_DEFINITION, { identifier, number }, transformChildren(ctx.footnoteDefs[identifier], ctx)))
+  }
+  return createNode(FOOTNOTES, {}, defs)
+}
+
+function collectFootnotes(node, out) {
+  if (node.type === 'footnoteDefinition' && !(node.identifier in out)) out[node.identifier] = node
+  for (const child of node.children ?? []) collectFootnotes(child, out)
+  return out
+}
+
+// ─── Heading anchors and ::toc ────────────────────────────────────────────────
+
+/**
+ * Give every heading a stable id from its text ("Get started" → "get-started",
+ * repeats → "-1", "-2"), never reusing an id set elsewhere on the page, then
+ * fill each ::toc with links to those ids.
+ */
+function linkHeadings(nodes) {
+  const seen = new Set()
+  const headings = []
+  const tocs = []
+  walk(nodes, n => {
+    if (n.id != null) seen.add(String(n.id))
+    if (n.type === HEADING) headings.push(n)
+    if (n.type === TOC_NODE) tocs.push(n)
+  })
+  for (const h of headings) {
+    if (h.id != null) continue
+    const base = slug(plainText(h))
+    let id = base
+    for (let i = 1; seen.has(id); i++) id = `${base}-${i}`
+    seen.add(id)
+    h.id = h.props.id = id
+  }
+  for (const toc of tocs) {
+    const max = Number(toc.props.depth) || 3
+    toc.children = [tocList(headings.filter(h => h.props.depth >= 2 && h.props.depth <= max))]
+  }
+}
+
+export function slug(text) {
+  return text.toLowerCase().trim().replace(/[^\p{L}\p{N}\s_-]/gu, '').replace(/\s+/g, '-') || 'section'
+}
+
+/** Nested List of links; a heading nests under the closest earlier heading of lower depth. */
+function tocList(headings) {
+  const root = createNode(LIST, { ordered: false })
+  const stack = [{ depth: 0, list: root }]
+  for (const h of headings) {
+    while (stack.length > 1 && stack.at(-1).depth >= h.props.depth) stack.pop()
+    const top = stack.at(-1)
+    if (!top.list) top.item.children.push(top.list = createNode(LIST, { ordered: false }))
+    const item = createNode(LIST_ITEM, {}, [createNode(LINK, { url: '#' + h.id, title: null }, [createNode(TEXT, { value: plainText(h) })])])
+    top.list.children.push(item)
+    stack.push({ depth: h.props.depth, item })
+  }
+  return root
+}
+
+function walk(nodes, fn) {
+  for (const n of nodes) {
+    fn(n)
+    if (n.children?.length) walk(n.children, fn)
+  }
 }
 
 // ─── Media ────────────────────────────────────────────────────────────────────

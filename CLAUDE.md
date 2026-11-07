@@ -13,6 +13,7 @@ source into a node tree that HyperBBS renders via OpenTUI. It also renders that 
 `src/`: `parser.js` (source → mdast + directives), `nodes.js` (node types),
 `transformer.js` (mdast → HyperMD node tree), `resolve.js` (query/template resolution),
 `template-engine.js` (interpolation), `html.js` (node tree → HTML, safe for page text),
+`site.js` (`applyLayout`, `siteMenu`: shared layout and menu, no filesystem),
 `build.js` + `bin/hypermd.js` (static site builder — the only code that touches the filesystem;
 deliberately not exported from `index.js`), `index.js` (public API — `parse`, `interpolate`,
 `renderHTML`, `renderPage`, …).
@@ -37,9 +38,24 @@ Three node types, one per kind (`nodes.js`): `AudioNode` (`::audio[caption]{src=
 Assertions: `test/media.test.js` here, and HyperBBS's
 `E:\Code\P2P\HyperBBS\test\brittle\media\hypermd-media-parse.js` (run it too when changing media). Design: `E:\Code\P2P\HyperBBS\specs\001-hypersite-media\`.
 
+## Docs-site features
+
+- Headings always get an id from their text (`slug()` in `transformer.js`), deduplicated against
+  every other id on the page. `::toc` is filled in the same pass (`linkHeadings`).
+- `::page{…}` goes to `doc.meta` (title/description kept as text, like media `src`).
+- GFM: only table, strikethrough, task list, footnote extensions — not the `gfm` bundle, whose
+  bare-URL autolinks would change existing pages.
+- Layout (`_layout.hmd` in the builder): `applyLayout` copies the layout, makes its relative
+  addresses `/…`, fills `::menu`, puts the page in `::content`, and sets `doc.layout` so
+  `renderPage` uses the slot as `<main>`.
+- The builder only deletes files listed in `<out>/.hypermd-build` from its previous run, and only
+  inside the output folder.
+- HyperBBS's terminal renderer drops node types it has no mapping for (blocks and inline), so new
+  node types need a mapping there to show up in the terminal.
+
 ## Tests
 
-Real `brittle` assertions in `test/*.test.js` (parser, query/template, resolve, media, HTML, build).
+Real `brittle` assertions in `test/*.test.js` (parser, query/template, resolve, media, HTML, site, build).
 `test/html.test.js` fails if a node type in `nodes.js` has no HTML case — add one when adding a type.
 
 ```bash

@@ -17,7 +17,7 @@ function findDeep(nodes, pred) {
 test('markdown passthrough: headings, paragraphs, inline marks', t => {
   const doc = parse('# Title\n\nSome **bold**, _em_ and `code`.')
   t.alike(tree(doc.nodes), [
-    { type: 'Heading', id: null, props: { depth: 1 }, children: [text('Title')] },
+    { type: 'Heading', id: 'title', props: { depth: 1, id: 'title' }, children: [text('Title')] },
     {
       type: 'Paragraph', id: null, props: {}, children: [
         text('Some '),
@@ -114,8 +114,8 @@ test('raw HTML in markdown is dropped', t => {
   t.alike(doc.nodes.map(n => n.type), ['Paragraph'])
 })
 
-test('unsupported markdown (blockquote) is dropped without crashing', t => {
-  t.alike(parse('> quoted').nodes, [])
+test('blockquote', t => {
+  t.alike(tree(parse('> quoted').nodes), [{ type: 'Blockquote', id: null, props: {}, children: [{ type: 'Paragraph', id: null, props: {}, children: [text('quoted')] }] }])
 })
 
 test(':::script body is extracted verbatim and not rendered', t => {
@@ -170,6 +170,6 @@ test('applyStyles reaches nested nodes', t => {
 
 test('parse output has the documented keys', t => {
   const doc = parse('x')
-  t.alike(Object.keys(doc).sort(), ['_mdast', 'nodes', 'queries', 'scripts', 'styles', 'templates'])
+  t.alike(Object.keys(doc).sort(), ['_mdast', 'meta', 'nodes', 'queries', 'scripts', 'styles', 'templates'])
   t.alike(Object.keys(doc.nodes[0]).sort(), ['_tuiRef', 'children', 'id', 'props', 'type'])
 })

@@ -15,7 +15,7 @@
  *
  *   applyStyles(doc.nodes, doc.styles)   // mutates doc.nodes in place
  *   renderHTML(doc.nodes)                // HTML fragment (see html.js)
- *   renderHTML(doc.nodes)                // HTML fragment (see html.js)
+ *   applyLayout(layout, doc, { menu })   // page inside _layout.hmd (see site.js)
  *
  * A HyperDOM node is a plain object:
  *   { type, id, props, children, _tuiRef }
@@ -29,7 +29,9 @@ export { parse, applyStyles } from './parser.js'
 export { transform } from './transformer.js'
 export { resolveExternals } from './resolve.js'
 export { interpolate } from './template-engine.js'
-export { renderHTML, renderPage, escapeHTML, safeURL, plainText } from './html.js'
+export { renderHTML, renderPage, escapeHTML, safeURL, plainText, pageTitle } from './html.js'
+export { applyLayout, siteMenu } from './site.js'
+export { slug } from './transformer.js'
 
 export {
   createNode,
@@ -71,6 +73,23 @@ export {
   LIST_ITEM,
   BREAK,
   COLOR_SPAN,
+  BLOCKQUOTE,
+  STRIKETHROUGH,
+  TABLE,
+  TABLE_ROW,
+  TABLE_CELL,
+  FOOTNOTE_REFERENCE,
+  FOOTNOTES,
+  FOOTNOTE_DEFINITION,
+
+  // Docs / site
+  NOTE_BOX,
+  TOC_NODE,
+  PAGE_META,
+  HEADER_NODE,
+  FOOTER_NODE,
+  MENU_NODE,
+  CONTENT_SLOT,
 
   // Media
   AUDIO_NODE,

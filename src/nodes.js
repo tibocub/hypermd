@@ -164,6 +164,52 @@ export const BREAK = 'Break'
 /** Inline: color span  :color[text]{fg=teal} */
 export const COLOR_SPAN = 'ColorSpan'
 
+/** Block: > quote */
+export const BLOCKQUOTE = 'Blockquote'
+
+/** Inline: ~~struck~~ */
+export const STRIKETHROUGH = 'Strikethrough'
+
+/** Block: | a | b | table. props.align: per column 'left' | 'center' | 'right' | null. First row is the header. */
+export const TABLE = 'Table'
+export const TABLE_ROW = 'TableRow'
+/** props.header (in the first row), props.align */
+export const TABLE_CELL = 'TableCell'
+
+/** Inline: [^label] — props.identifier, props.number (1, 2… in order of first use) */
+export const FOOTNOTE_REFERENCE = 'FootnoteReference'
+
+/** Block: the footnotes, appended once at the end of the page; children are FootnoteDefinition */
+export const FOOTNOTES = 'Footnotes'
+
+/** Block: [^label]: text — props.identifier, props.number */
+export const FOOTNOTE_DEFINITION = 'FootnoteDefinition'
+
+// ─── Docs / site ─────────────────────────────────────────────────────────────
+
+/** :::note, :::tip, :::warning — a boxed aside. props.kind is the directive name. */
+export const NOTE_BOX = 'NoteBox'
+
+/** ::toc — table of contents; children are a List of links to the page's headings (h2–h3, or up to depth=N) */
+export const TOC_NODE = 'TocNode'
+
+/**
+ * ::page{title=… description=… order=N} — page details, not rendered.
+ * Collected into doc.meta; the site builder uses them for <title>, the
+ * description meta and the menu order.
+ */
+export const PAGE_META = 'PageMeta'
+
+/** :::header / :::footer — the page's header and footer (usually in _layout.hmd) */
+export const HEADER_NODE = 'HeaderNode'
+export const FOOTER_NODE = 'FooterNode'
+
+/** ::menu — site menu; filled with a List of page links by applyLayout() */
+export const MENU_NODE = 'MenuNode'
+
+/** ::content — where a layout puts the page; applyLayout() fills its children */
+export const CONTENT_SLOT = 'ContentSlot'
+
 // ─── Media ───────────────────────────────────────────────────────────────────
 // Audio, video and images. Always leaf nodes with no children. Their `src`
 // is kept as text, never fetched, and never converted to a number. See
@@ -189,6 +235,11 @@ export const DIRECTIVE_MAP = {
   script:   SCRIPT_BLOCK,
   style:    STYLE_BLOCK,
   template: TEMPLATE_BLOCK,
+  note:     NOTE_BOX,
+  tip:      NOTE_BOX,
+  warning:  NOTE_BOX,
+  header:   HEADER_NODE,
+  footer:   FOOTER_NODE,
 
   // leaves (::name)
   input:    INPUT_NODE,
@@ -198,6 +249,10 @@ export const DIRECTIVE_MAP = {
   bigtext:  BIGTEXT_NODE,
   hr:       DIVIDER_NODE,
   query:    QUERY_BLOCK,    // ::query (leaf) — all config in attributes, no body
+  toc:      TOC_NODE,
+  page:     PAGE_META,
+  menu:     MENU_NODE,
+  content:  CONTENT_SLOT,
 
   // media (::name)
   audio:    AUDIO_NODE,
@@ -207,6 +262,11 @@ export const DIRECTIVE_MAP = {
 
   // inline (:name[...])
   color:   COLOR_SPAN,
+}
+
+/** Concatenated text of a node and its children. */
+export function plainText(node) {
+  return (node.props?.value ?? node.props?.label ?? '') + (node.children ?? []).map(plainText).join('')
 }
 
 /**
