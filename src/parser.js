@@ -14,6 +14,14 @@
 import { fromMarkdown } from 'mdast-util-from-markdown'
 import { directiveFromMarkdown } from 'mdast-util-directive'
 import { directive } from 'micromark-extension-directive'
+import { gfmTable } from 'micromark-extension-gfm-table'
+import { gfmTableFromMarkdown } from 'mdast-util-gfm-table'
+import { gfmStrikethrough } from 'micromark-extension-gfm-strikethrough'
+import { gfmStrikethroughFromMarkdown } from 'mdast-util-gfm-strikethrough'
+import { gfmTaskListItem } from 'micromark-extension-gfm-task-list-item'
+import { gfmTaskListItemFromMarkdown } from 'mdast-util-gfm-task-list-item'
+import { gfmFootnote } from 'micromark-extension-gfm-footnote'
+import { gfmFootnoteFromMarkdown } from 'mdast-util-gfm-footnote'
 import { transform } from './transformer.js'
 
 /**
@@ -26,18 +34,23 @@ import { transform } from './transformer.js'
  *   nodes:   object[],
  *   styles:  object[],
  *   scripts: object[],
+ *   meta:    object,    // ::page{title description order}, {} when absent
  *   _mdast:  object,    // raw mdast root, useful for debugging
  * }}
  */
 export function parse(source, opts = {}) {
-  // 1. Parse markdown with directive extension
+  // 1. Parse markdown with directives and the GFM parts we use (not GFM's
+  // bare-URL autolinks, which would change existing pages' text)
   const mdast = fromMarkdown(source, {
-    extensions: [directive()],
-    mdastExtensions: [directiveFromMarkdown()],
+    extensions: [directive(), gfmTable(), gfmStrikethrough(), gfmTaskListItem(), gfmFootnote()],
+    mdastExtensions: [
+      directiveFromMarkdown(), gfmTableFromMarkdown(), gfmStrikethroughFromMarkdown(),
+      gfmTaskListItemFromMarkdown(), gfmFootnoteFromMarkdown(),
+    ],
   })
 
   // 2. Transform mdast → HyperDOM (pass raw source for verbatim script/style extraction)
-  const { nodes, styles, scripts, queries, templates } = transform(mdast, source)
+  const { nodes, styles, scripts, queries, templates, meta } = transform(mdast, source)
 
   return {
     nodes,
@@ -45,6 +58,7 @@ export function parse(source, opts = {}) {
     scripts,
     queries,
     templates,
+    meta,
     _mdast: mdast,
   }
 }

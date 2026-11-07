@@ -16,6 +16,10 @@
  * :::style rules (terminal props like fg/bold) are not turned into CSS.
  */
 
+import { plainText } from './nodes.js'
+
+export { plainText }
+
 const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
 
 export function escapeHTML(value) {
@@ -46,31 +50,43 @@ export function renderHTML(nodes, opts = {}) {
  *
  * @param {object} doc - the result of parse()
  * @param {object} [opts]
- * @param {string}   [opts.title]   - defaults to the first heading's text
+ * @param {string}   [opts.title]   - defaults to ::page{title}, then the first heading's text
+ * @param {string}   [opts.description] - defaults to ::page{description}
+ * @param {string}   [opts.base]    - absolute site address for <base href> (the 404 page needs it)
  * @param {string[]} [opts.styles]  - stylesheet addresses for <link>
  * @param {string[]} [opts.scripts] - script addresses for <script type=module>
  * @param {string}   [opts.lang]
  * @param {(url: string) => string} [opts.href]
  */
 export function renderPage(doc, opts = {}) {
-  const heading = doc.nodes.find(n => n.type === 'Heading')
-  const title = opts.title ?? (heading ? plainText(heading) : '')
+  const description = opts.description ?? doc.meta?.description
   const head = [
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
-    `<title>${escapeHTML(title)}</title>`,
+    `<title>${escapeHTML(opts.title ?? pageTitle(doc))}</title>`,
+    description != null && `<meta name="description" content="${escapeHTML(description)}">`,
+    opts.base && `<base href="${attr(opts.base)}">`,
     ...(opts.styles ?? []).map(s => `<link rel="stylesheet" href="${attr(s)}">`),
     ...(opts.scripts ?? []).map(s => `<script type="module" src="${attr(s)}"></script>`),
-  ]
-  return `<!doctype html>\n<html lang="${escapeHTML(opts.lang ?? 'en')}">\n<head>\n${head.join('\n')}\n</head>\n<body>\n<main class="hmd-page">\n${renderHTML(doc.nodes, opts)}\n</main>\n</body>\n</html>\n`
+  ].filter(Boolean)
+  // With a layout (applyLayout), its ::content slot is the <main>
+  const body = doc.layout ? renderHTML(doc.nodes, opts) : `<main class="hmd-page">\n${renderHTML(doc.nodes, opts)}\n</main>`
+  return `<!doctype html>\n<html lang="${escapeHTML(opts.lang ?? 'en')}">\n<head>\n${head.join('\n')}\n</head>\n<body>\n${body}\n</body>\n</html>\n`
 }
 
-/** Concatenated text of a node and its children. */
-export function plainText(node) {
-  return (node.props?.value ?? node.props?.label ?? '') + (node.children ?? []).map(plainText).join('')
+/** ::page{title}, else the first heading's text, else "". */
+export function pageTitle(doc) {
+  if (doc.meta?.title != null) return String(doc.meta.title)
+  const heading = doc.nodes.find(n => n.type === 'Heading')
+  return heading ? plainText(heading) : ''
 }
 
 // ─── Internal ─────────────────────────────────────────────────────────────────
+
+// Footnote labels are free text; keep the id one word
+function footnoteId(identifier) {
+  return String(identifier ?? '').replace(/\s+/g, '-')
+}
 
 function attr(url, opts = {}) {
   return escapeHTML(safeURL(opts.href ? opts.href(url) : url))
@@ -137,9 +153,43 @@ function renderNode(node, opts) {
       const lang = p.lang ? `language-${p.lang}` : null
       return tag('pre', node, `<code${lang ? ` class="${escapeHTML(lang)}"` : ''}>${escapeHTML(p.value)}</code>`) + '\n'
     }
-    case 'Link':        return `<a${attrs(node, { title: p.title })} href="${attr(p.url, opts)}">${kids()}</a>`
+    case 'Link':        return `<a${attrs(node, { title: p.title, 'aria-current': p.current ? 'page' : null })} href="${attr(p.url, opts)}">${kids()}</a>`
     case 'List':        return tag(p.ordered ? 'ol' : 'ul', node, '\n' + kids()) + '\n'
-    case 'ListItem':    return tag('li', node, kids()) + '\n'
+    case 'ListItem': {
+      if (typeof p.checked !== 'boolean') return tag('li', node, kids()) + '\n'
+      const box = `<input type="checkbox" disabled${p.checked ? ' checked' : ''}> `
+      return tag('li', node, box + kids(), { class: 'hmd-ListItem hmd-task' }) + '\n'
+    }
+    case 'Blockquote':    return tag('blockquote', node, '\n' + kids()) + '\n'
+    case 'Strikethrough': return tag('del', node, kids())
+    case 'Table': {
+      const [head, ...rows] = node.children ?? []
+      const body = rows.map(r => renderNode(r, opts)).join('')
+      return tag('table', node, `\n<thead>\n${head ? renderNode(head, opts) : ''}</thead>\n<tbody>\n${body}</tbody>\n`) + '\n'
+    }
+    case 'TableRow':  return tag('tr', node, kids()) + '\n'
+    case 'TableCell': {
+      const align = ['left', 'center', 'right'].includes(p.align) ? `text-align:${p.align}` : null
+      return tag(p.header ? 'th' : 'td', node, kids(), { style: align })
+    }
+    case 'FootnoteReference': {
+      const id = escapeHTML(footnoteId(p.identifier))
+      return tag('sup', node, `<a id="fnref-${id}" href="#fn-${id}">${escapeHTML(p.number)}</a>`)
+    }
+    case 'Footnotes': return tag('section', node, `\n<ol>\n${kids()}</ol>\n`, { role: 'doc-endnotes' }) + '\n'
+    case 'FootnoteDefinition': {
+      const id = footnoteId(p.identifier)
+      return tag('li', node, kids() + `<a class="hmd-backref" href="#fnref-${escapeHTML(id)}" aria-label="Back to text">↩</a>`, { id: `fn-${id}` }) + '\n'
+    }
+
+    // kind is a directive name (note, tip, warning), never page text
+    case 'NoteBox':     return tag('aside', node, '\n' + kids(), { class: `hmd-NoteBox hmd-${p.kind ?? 'note'}`, role: 'note' }) + '\n'
+    case 'TocNode':     return tag('nav', node, '\n' + kids(), { 'aria-label': 'Contents' }) + '\n'
+    case 'MenuNode':    return tag('nav', node, '\n' + kids(), { 'aria-label': 'Site' }) + '\n'
+    case 'HeaderNode':  return tag('header', node, '\n' + kids()) + '\n'
+    case 'FooterNode':  return tag('footer', node, '\n' + kids()) + '\n'
+    case 'ContentSlot': return tag('main', node, '\n' + kids(), { class: 'hmd-page hmd-ContentSlot' }) + '\n'
+    case 'PageMeta':    return ''
     case 'Break':       return '<br>\n'
     case 'DividerNode': return `<hr${attrs(node)}>\n`
     case 'ColorSpan': {

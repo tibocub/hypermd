@@ -5,7 +5,7 @@ const html = src => renderHTML(parse(src).nodes)
 
 // One case per node type; the coverage test below fails if a type is missing
 const cases = {
-  Heading: ['## Hi', '<h2 class="hmd-Heading">Hi</h2>\n'],
+  Heading: ['## Hi', '<h2 id="hi" class="hmd-Heading">Hi</h2>\n'],
   Paragraph: ['hello', '<p class="hmd-Paragraph">hello</p>\n'],
   Text: ['a & b', '<p class="hmd-Paragraph">a &amp; b</p>\n'],
   Strong: ['**b**', '<p class="hmd-Paragraph"><strong class="hmd-Strong">b</strong></p>\n'],
@@ -34,7 +34,38 @@ const cases = {
   TemplateBlock: ['::query{as=p}\n\n:::template{for=p}\n{{x}}\n:::', ''],
   ScriptBlock: [':::script\nalert(1)\n:::', ''],
   StyleBlock: [':::style\n{}\n:::', ''],
+  Blockquote: ['> q', '<blockquote class="hmd-Blockquote">\n<p class="hmd-Paragraph">q</p>\n</blockquote>\n'],
+  Strikethrough: ['~~x~~', '<p class="hmd-Paragraph"><del class="hmd-Strikethrough">x</del></p>\n'],
+  Table: ['| a | b |\n|:-|-|\n| 1 | 2 |', '<table class="hmd-Table">\n<thead>\n<tr class="hmd-TableRow"><th class="hmd-TableCell" style="text-align:left">a</th><th class="hmd-TableCell">b</th></tr>\n</thead>\n<tbody>\n<tr class="hmd-TableRow"><td class="hmd-TableCell" style="text-align:left">1</td><td class="hmd-TableCell">2</td></tr>\n</tbody>\n</table>\n'],
+  TableRow: ['| a |\n|-|', '<table class="hmd-Table">\n<thead>\n<tr class="hmd-TableRow"><th class="hmd-TableCell">a</th></tr>\n</thead>\n<tbody>\n</tbody>\n</table>\n'],
+  TableCell: ['| a |\n|:-:|\n| `c` |', '<table class="hmd-Table">\n<thead>\n<tr class="hmd-TableRow"><th class="hmd-TableCell" style="text-align:center">a</th></tr>\n</thead>\n<tbody>\n<tr class="hmd-TableRow"><td class="hmd-TableCell" style="text-align:center"><code class="hmd-InlineCode">c</code></td></tr>\n</tbody>\n</table>\n'],
+  FootnoteReference: ['a[^n]\n\n[^n]: N', '<p class="hmd-Paragraph">a<sup class="hmd-FootnoteReference"><a id="fnref-n" href="#fn-n">1</a></sup></p>\n<section class="hmd-Footnotes" role="doc-endnotes">\n<ol>\n<li id="fn-n" class="hmd-FootnoteDefinition"><p class="hmd-Paragraph">N</p>\n<a class="hmd-backref" href="#fnref-n" aria-label="Back to text">↩</a></li>\n</ol>\n</section>\n'],
+  Footnotes: ['[^a]: unused', ''],
+  FootnoteDefinition: ['x[^My-Note]\n\n[^my-note]: Y', '<p class="hmd-Paragraph">x<sup class="hmd-FootnoteReference"><a id="fnref-my-note" href="#fn-my-note">1</a></sup></p>\n<section class="hmd-Footnotes" role="doc-endnotes">\n<ol>\n<li id="fn-my-note" class="hmd-FootnoteDefinition"><p class="hmd-Paragraph">Y</p>\n<a class="hmd-backref" href="#fnref-my-note" aria-label="Back to text">↩</a></li>\n</ol>\n</section>\n'],
+  NoteBox: [':::warning\nx\n:::', '<aside class="hmd-NoteBox hmd-warning" role="note">\n<p class="hmd-Paragraph">x</p>\n</aside>\n'],
+  TocNode: ['::toc\n\n# T\n\n## A\n\n### B\n\n## C', '<nav class="hmd-TocNode" aria-label="Contents">\n<ul class="hmd-List">\n<li class="hmd-ListItem"><a class="hmd-Link" href="#a">A</a><ul class="hmd-List">\n<li class="hmd-ListItem"><a class="hmd-Link" href="#b">B</a></li>\n</ul>\n</li>\n<li class="hmd-ListItem"><a class="hmd-Link" href="#c">C</a></li>\n</ul>\n</nav>\n<h1 id="t" class="hmd-Heading">T</h1>\n<h2 id="a" class="hmd-Heading">A</h2>\n<h3 id="b" class="hmd-Heading">B</h3>\n<h2 id="c" class="hmd-Heading">C</h2>\n'],
+  PageMeta: ['::page{title=T}', ''],
+  HeaderNode: [':::header\nx\n:::', '<header class="hmd-HeaderNode">\n<p class="hmd-Paragraph">x</p>\n</header>\n'],
+  FooterNode: [':::footer\nx\n:::', '<footer class="hmd-FooterNode">\n<p class="hmd-Paragraph">x</p>\n</footer>\n'],
+  MenuNode: ['::menu', '<nav class="hmd-MenuNode" aria-label="Site">\n</nav>\n'],
+  ContentSlot: ['::content', '<main class="hmd-page hmd-ContentSlot">\n</main>\n'],
 }
+
+test('renders a task list', t => {
+  t.is(html('- [x] a\n- [ ] b\n- c'), '<ul class="hmd-List">\n' +
+    '<li class="hmd-ListItem hmd-task"><input type="checkbox" disabled checked> <p class="hmd-Paragraph">a</p>\n</li>\n' +
+    '<li class="hmd-ListItem hmd-task"><input type="checkbox" disabled> <p class="hmd-Paragraph">b</p>\n</li>\n' +
+    '<li class="hmd-ListItem"><p class="hmd-Paragraph">c</p>\n</li>\n</ul>\n')
+})
+
+test('safety: new nodes escape their text', t => {
+  const out = html('x[^a"<b>]\n\n[^a"<b>]: y\n\n| <i>"q"</i> |\n|-|\n\n## <script>"h"\n\n~~<u>~~')
+  t.absent(/<b>|<i>|<script|<u>/.test(out), 'no raw tags')
+  t.ok(out.includes('id="fn-a&quot;&lt;b&gt;"'), 'footnote id escaped')
+  // a hand-made tree can't smuggle a style or class either
+  const cell = createNode('TableCell', { align: 'left;background:url(x)' })
+  t.is(renderHTML([cell]), '<td class="hmd-TableCell"></td>')
+})
 
 for (const [type, [src, want]] of Object.entries(cases)) {
   test(`renders ${type}`, t => t.is(html(src), want))
